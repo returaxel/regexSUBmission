@@ -22,10 +22,10 @@
 
 .EXAMPLE
     Might want to output into a variable
-        $EatTheOutput = .\untangleable-webfilter.ps1 -BlockListURL 'https://raw.githubusercontent.com/returaxel/untangleable-json/main/TestList.txt' 
+        $EatTheOutput = .\regexSUBmission.ps1 -BlockListURL 'https://raw.githubusercontent.com/returaxel/untangleable-json/main/TestList.txt' 
 
     Should the list be enormous, might want to output only the duplicate list
-        $EatTheOutput = .\untangleable-webfilter.ps1 -BlockListURL 'https://raw.githubusercontent.com/returaxel/untangleable-json/main/TestList.txt' 
+        $EatTheOutput = .\regexSUBmission.ps1 -BlockListURL 'https://raw.githubusercontent.com/returaxel/untangleable-json/main/TestList.txt' 
         $EatTheOutput.Duplicate | ConvertTo-Json | Set-Content <path_here>
 #>
 
@@ -43,8 +43,6 @@ function Get-StreamReaderArray {
    )
     # https://blog.dcrich.net/post/2022/powershell-journeyman-generic-collections/#queue
     $GenericList = [System.Collections.Generic.List[string]]@()
-
-$MeasurePanda = Measure-Command {
         
     $StreamReader = [System.IO.StreamReader]::New($PathTXT)
 
@@ -52,12 +50,8 @@ $MeasurePanda = Measure-Command {
         $GenericList.Add($Line)
     }
 
-}   
-    # Write-Host "Import-BlockListTXT.RunTime: $($MeasurePanda.TotalSeconds)s"
-
     $StreamReader.Dispose()
     return  $GenericList
-
 }
 
 function RegexMagic {
