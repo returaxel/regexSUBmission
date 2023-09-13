@@ -130,7 +130,7 @@ $RegexOperation = Measure-Command {
                         $OutHash.Host[$Key] = [ordered]@{
                             # Add to hashtable. Comment out (#) things you don't care about.
                             URL = $_
-                            SUB = [ordered]@{[string]$RegexMatch.Groups[1].Value = $null} # Sub domain
+                            SUB = [ordered]@{[string]$RegexMatch.Groups[1].Value = $Iteration} # Sub domain
                             SLD = [string]$RegexMatch.Groups[2].Value # Second level domains - everything between SUB and TLD
                             TLD = [string]$RegexMatch.Groups[3].Value # Top level domain
                             FullMatch = '{0}{1}{2}' -f $RegexMatch.Groups[1].Value,$RegexMatch.Groups[2].Value,$RegexMatch.Groups[3].Value
