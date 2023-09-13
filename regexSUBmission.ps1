@@ -134,7 +134,7 @@ $RegexOperation = Measure-Command {
                     else {
                         # If the key didn't exist, add new entry
                         $OutHash.Host[$Key] = [ordered]@{
-                            # Information
+                            # Add to hashtable. Comment out (#) things you don't care about.
                             URL = $_
                             SUB = [ordered]@{[string]$RegexMatch.Groups[1].Value = $null} # Sub domain
                             SLD = [string]$RegexMatch.Groups[2].Value # Second level domains - everything between SUB and TLD
