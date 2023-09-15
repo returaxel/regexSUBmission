@@ -2,9 +2,11 @@
 .DESCRIPTION
     --------- DISCLAIMER ---------
             Might not work
-             EATER OF RAM
     -------------------------------
-    Learning new things - terribly inefficient - don't use this
+    Input a blocklist to view statistics and consolidate (OPT)
+        - Output 
+            - json: hashtable with all information (exported: 200k domains ~100MB)
+            - psobject: with consolidated unique SLDTLD (everything above subdomain) and subdomain count
 
 .PARAMETER BlockListURL
     Fetch list from the world wide web
@@ -14,29 +16,35 @@
 
 .PARAMETER ConsolidateGE
     How many subdomains are considered a-okay
+
+.PARAMETER OutputAs
+    Select what to return after ran. 
+        info (always): only shows information
+        json (opt): hashtable which can be exported as .json 
+        psobject (opt): can be exported to shorter list with wildcards
     
 .PARAMETER OutSkipped
     View skipped entries in terminal, they fly by
 
 .NOTES
     Author: returaxel
-    Updated: Almost handles an array of lists, now outputs information without user input
-    Planned: Wildcard-Magic
+    Version: 1.0.6
+    Updated: Now easier on RAM, aggregates subdomains with wilcards and shows information without interaction 
 
 .EXAMPLE
     Might want to output into a variable
         $EatTheOutput = .\regexSUBmission.ps1 -BlockListURL 'https://raw.githubusercontent.com/returaxel/untangleable-json/main/TestList.txt' 
 
-    Multiple lists is asking for trouble, output does function, kinda. Heres how!
+    Multiple lists is asking for trouble but almost functions. Heres how!
         $EatTheOutput = [array]$urls | % {
         .\regexSUBmission.ps1 $_ -BlockListURL $_}
 #>
 
 [CmdletBinding(DefaultParametersetName='One')] 
 param (
-    [Parameter()][string]$ListID = 'Blacklist',
     [Parameter(ParameterSetName='One')][string]$BlockListURL,
     [Parameter(ParameterSetName='Two')][string]$BlockListTXT,
+    [ValidateSet('info','json','psobject')][string]$OutputAs = 'info',
     [Parameter()][int]$ConsolidateGE = 5,
     [Parameter()][switch]$OutSkipped
 )
@@ -53,7 +61,7 @@ function Get-StreamReaderArray {
         $StreamReader = [System.IO.StreamReader]::New($PathTXT)
     }
     catch {
-        Write-Host `n$PSItem.Exception.Message -ForegroundColor Red
+        Write-Host StreamReader`n$PSItem.Exception.Message -ForegroundColor Red
         Break
     }
 
@@ -68,7 +76,7 @@ function Get-StreamReaderArray {
 function RegexMagic {
     param (
         [Parameter()][array]$BlockList,
-        [Parameter()][string]$Regex = '(?!^[\w]*[ ])([\w*-]+)(\b[\w.*-]+)?(\.[\w]+)(?:[\W]*?$)'
+        [Parameter()][string]$Regex = '^(?>[\d.]+?\ |)([\w*-]+)(\.[\w.*-]+)?(\.[\w-]+)(.*?$)'
     ) 
 
     # Hashtable
@@ -84,17 +92,17 @@ $RunTime = Measure-Command {
     [int]$Iteration = 0
 
     # Start working your way thru the list
-    $BlockList | ForEach-Object {
+    foreach ($line in $BlockList) {
 
         # Skip empty and commented lines, edit regex as needed
-        if (-not[string]::IsNullOrWhiteSpace($_) -and (-not[regex]::Match($_,'^!|@|#').Success)) {
+        if (-not[string]::IsNullOrWhiteSpace($line) -and (-not[regex]::Match($line,'^!|@|#').Success)) {
 
             # Add one every time
             $Iteration += 1
 
             # If there's a domain on the current line it should match here
             # The brain of the operation
-            $RegexMatch = [regex]::Matches($_, $Regex)
+            $RegexMatch = [regex]::Matches($line, $Regex)
 
             # Continue if match
             if (-not[string]::IsNullOrEmpty($RegexMatch)) {
@@ -102,12 +110,16 @@ $RunTime = Measure-Command {
 # Measure each iteration, added to the next one because of reasons
 $RegexOperation = Measure-Command {
 
-                # Full match here or throw errors due to emptiness inside
+                # DEBUG: .Groups[4] should match lines with comments after the domain and weird formats
+                if (($RegexMatch.Groups[4].Value) -as [bool]) {
+                    Write-Host "MatchG4: $line"
+                }
+
+                # Values we
                 $RegexTotal = '{0}{1}{2}' -f [string]$RegexMatch.Groups[1].Value,[string]$RegexMatch.Groups[2].Value,[string]$RegexMatch.Groups[3].Value
                 $SLDTLD = '{0}{1}' -f [string]$RegexMatch.Groups[2].Value,[string]$RegexMatch.Groups[3].Value
                 $SUBTLD ='{0}{1}' -f [string]$RegexMatch.Groups[1].Value,[string]$RegexMatch.Groups[3].Value
 
-                # Try to avoid unnecessary duplicates
                 try {
                     [bool]$SLD = ($RegexMatch.Groups[2].Value)-as [bool]
                     [string]$Key = switch ($SLD) {
@@ -122,8 +134,8 @@ $RegexOperation = Measure-Command {
                            $OutHash['Domains'][$Key]['SUB'].Add([string]$RegexMatch.Groups[1].Value,$Iteration)
                        }
                        catch {
-                            Write-Host `n$PSItem.Exception.Message -ForegroundColor Red -NoNewline
-                            Write-Host " [ $Key ]" -ForegroundColor DarkGray
+                            Write-Host `n$PSItem.Exception.Message -ForegroundColor Red
+                            Write-Host "Error: $line" -ForegroundColor DarkGray
                        }
                     }
                     else {                   
@@ -145,6 +157,8 @@ $RegexOperation = Measure-Command {
                     Write-Host $PSItem.Exception.Message -ForegroundColor DarkRed
                 }  
 } # END MEASURE (Measured object is added to the next iteration)
+            } else {
+                Write-Host "NoMatch: $line" -ForegroundColor DarkGray
             }
 
         # Add time to run for iteration
@@ -155,58 +169,72 @@ $RegexOperation = Measure-Command {
         } # Output skipped entries / comments
         elseif ($OutSkipped) {
             $Comments += 1
-            Write-Host $_ -ForegroundColor DarkGray
+            Write-Host $line -ForegroundColor DarkGray
         }
 
     }
 
 } # END MEASURE full duration
 
-    # Statistics
-    $AggregateSUB = [System.Collections.Generic.List[int]]@()
+# --------------[ INFORMATION ] --------------
 
-    # Informational: How many domains before wildcard
     # ConsolidateGE sets the subdomain limit for a unique SLD+TLD match
-    $OutHash['Domains'].keys | ForEach-Object {
-        if ([int]$OutHash['Domains'][$_]['SUB'].Values.Count -ge $ConsolidateGE) {
-            [int]$SubdomainTotal += [int]$OutHash['Domains'][$_]['SUB'].Values.Count
-            $AggregateSUB.Add([int]$OutHash['Domains'][$_]['SUB'].Values.Count)
+    $Aggregated = [System.Collections.Generic.List[PSObject]]@()
+
+    foreach ($domain in $OutHash['Domains'].Keys) {
+
+        [int]$SUBTotal = [int]$OutHash['Domains'][$domain]['SUB'].Values.Count
+
+        # Proceed if subdomain count -GE ConsolidateGE
+        if ([int]$SUBTotal -ge $ConsolidateGE) {
+
+            # if ($OutWildcard){ 
+            # Add SLD+TLD and the total subdomains for each to an object
+                $Aggregated.Add([PSCustomObject]@{Domain = ('*{0}' -f $domain);SUBTotal = $SUBTotal})
+            # }
         }
     }
 
-    $OutStatistics = ($AggregateSUB | Measure-Object -Minimum -Maximum -Sum -Average | Select-Object -ExcludeProperty Property)
+    $OutStatistics = ($Aggregated.SubTotal | Measure-Object -Minimum -Maximum -Sum -Average)
 
     # Information and statistics in the hashtable
     $OutHash['Info'] = [ordered]@{
         Source = "$([int]$BlockList.Length) entries" # comments and blank included
         Output = "$([int]$OutHash['Domains'].keys.count) entries" # unique only
-        Duplicated = "$($AggregateSUB.Count) | sum of SLD+TLD matched more than once" # matched SLD+TLD
-        Aggregated = "$([int]$SubdomainTotal) | sum of their children" # subdomain / hosts that have common SLD+TLD parents
+        Duplicated = "$($Aggregated.Domain.Count) | sum of SLD+TLD with more than $($ConsolidateGE) subdomains" # matched SLD+TLD
+        Aggregated = "$([int]$OutStatistics.Sum) | sum of their children" # subdomain / hosts that have common SLD+TLD parents
         Breakdown = $OutStatistics
         Iterations = "$([int]$Iteration)" # comments excluded
         RunTime = "$($RunTime.TotalSeconds) seconds"
     }
 
-    # Terminal FLUFF
+    # -------------- [ OUTPUT ] --------------
+
     Write-Host "`n`n`t`t SUMMARY`n##############################################`n" -ForegroundColor DarkCyan
-    Write-Host "Read the code comments for some more info" -ForegroundColor DarkGray
+    switch ($OutputAs) {
+        json    { $OutHash }
+        psobject{ $Aggregated }
+        default { Write-Host "Default output: information"}
+        }
+
+    Write-Host "Visit github ReadMe for more information" -ForegroundColor DarkGray
     $OutHash['Info'] | ConvertTo-Json -Depth 3 | Out-Host
     Write-Host "##############################################" -ForegroundColor DarkCyan
 
-    $OutHash
-    
+# -------------- [ CLEANUP ] --------------
+
     # RAM Memorial
-    Remove-Variable OutHash, OutStatistics, AggregateSUB
+    Remove-Variable OutHash, OutStatistics, Aggregated
     if ($Iteration -ge 50000) {
         [GC]::Collect()
     }
 }
 
-# Attempt to build array out of selected source
-# Output need to be caught or bad times be had
+# -------------- [ SCRIPT ] --------------
+# Makes an array of input (or throw error) and send it thru RegexMagic
 if (-not[string]::IsNullOrEmpty($BlockListURL)) {
     RegexMagic -BlockList ((Invoke-WebRequest $BlockListURL -UseBasicParsing).Content -split '\r?\n')
 } 
 elseif (-not[string]::IsNullOrEmpty($BlockListTXT)) {
     RegexMagic -BlockList (Get-StreamReaderArray -Path $BlockListTXT)
-} 
+}
