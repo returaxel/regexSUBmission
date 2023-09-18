@@ -8,6 +8,8 @@
             - hashtable: hashtable with all information (exported as .json: 200k domains ~100MB)
             - psobject: with consolidated unique SLDTLD (everything above subdomain) and subdomain count
 
+        Could be done better with .Substring / IndexOf but this is a regex project
+
 .PARAMETER BlockListURL
     Fetch list from the world wide web
 
@@ -71,7 +73,7 @@ function RegexSUBmission {
     param (
         [Parameter()][string]$InputStr,         # String to parse
         [Parameter()][string]$Regex = '^(?>[\d.]+\ |[.*-]?)([\w*-]+)(\.?[\w.*-]+)?(\.[\w-]{2,})(.*$)',
-        [Parameter()][string]$IndexOf,          # From RegexMagic to track where we are in the source
+        [Parameter()][string]$IndexOf,          # From ListDestroyer to track where we are in the source
         [Parameter()][Psobject]$PrevObject,     # When resubmitting bring previous result
         [Parameter()][int]$ReSubmissions = 0,   # Prevent eternal looping if something is wrong
         [Parameter()][int]$HardLoopLimit = 50,  # If the input depth exceeds this value it's skipped (depth = sum of dots)
@@ -91,6 +93,7 @@ function RegexSUBmission {
 
     # Continue if match found
     if (-not[string]::IsNullOrEmpty($RexFullMatch) -and ($InputDepth -le $HardLoopLimit)) {
+
         # Check if match contains an SLD
         [bool]$SLD = ($RexMatch.Groups[2].Value) -as [bool]
         # ReRun limt is the total punctuations in parsed input, if reached end loop
@@ -101,7 +104,7 @@ function RegexSUBmission {
             Default { $PrevObject.InputDepth }
         }
 
-        # START: EXTREMEDEBUG
+        # START: EXTREMEDEBUG 2.0
         # Writes information to file every time it passes thru (a lot)
         if ($ExtremeDebug) { 
             #[PSCustomObject]@{
@@ -118,7 +121,7 @@ function RegexSUBmission {
             #    Output = ('{0}.{1}' -f "($($PrevObject.SUB))", $RexFullMatch) # (SUB) value is added to domains ending with SLD+TLD (like co.uk)
             #    "Iterations(Max)" = "$ReSubmissions($DepthOfOriginal)"
             #} | Export-Csv D:\BlackLists_Test\RegexResult_new.csv -NoTypeInformation -Append
-        } # END: EXTREMEDEBUG
+        } # END: EXTREMEDEBUG 2.0
 
         <# WHITELIST 
         Domains ending with SLD+TLD (example: ".co.uk"), will be consolidated under ".co.uk" unless whitelisted
@@ -154,7 +157,7 @@ function RegexSUBmission {
         } 
 
 # -------------------- [ Looping ] 
-        # Stop looping when SLD:$false or reached total input depth (-2)
+        # Stop looping when SLD:$false or reached depth of the first input (this loop)
         if ((-not$SLD) -or ($ReSubmissions -eq $PrevObject.InputDepth)) {      
 
             # DEBUG
@@ -190,11 +193,10 @@ function RegexSUBmission {
                 Input = $InputStr
                 InputDepth = $DepthOfOriginal
             })
-        } 
-
+        }
     }             
     else {
-        # Didn't match regex
+        # InputStr was too long
         Write-Host "DepthErr:    |" -NoNewline -ForegroundColor DarkMagenta
         Write-Host "`t@$IndexOf`t|`t Return:NULL | $InputStr " -ForegroundColor DarkGray
         return $null
@@ -226,7 +228,7 @@ function Get-StreamReaderArray {
     return $GenericList.ToArray()
 }
 
-function RegexMagic {
+function ListDestroyer {
     param (
         [Parameter()][array]$BlockList,
         [ValidateSet('info','hashtable','psobject')][string]$OutputAs = 'info',
@@ -240,6 +242,7 @@ function RegexMagic {
     $HashTable = @{
         Info = [ordered]@{} # Operational info 
         Domains = [ordered]@{} # Domain list
+        Whitelist = [ordered]@{}
     }
 
 # Measure full duration
@@ -260,23 +263,20 @@ $RunTime = Measure-Command {
         }
 
         # Skip empty and commented lines, edit regex as needed
-        if (-not[string]::IsNullOrWhiteSpace($line) -and (-not[regex]::Match($line,'^!|@|#').Success)) {
+        if (-not[string]::IsNullOrWhiteSpace($line) -and (-not[regex]::Match($line,'^!|^@|^#|^<').Success)) {
 
             # Regex function
             try {
                 $RegexMatch = RegexSUBmission -InputStr $line -IndexOf $IndexOf -ExtremeDebug:$ExtremeDebug
             }
             catch {
-                Write-Host "CatchRex:   |" -NoNewline -ForegroundColor Cyan
+                Write-Host "No_Match:   |" -NoNewline -ForegroundColor Magenta
                 Write-Host "`t@$IndexOf`t|`t $line" -ForegroundColor DarkGray
             }
 
             # Continue if match
             if (-not[string]::IsNullOrEmpty($RegexMatch.TLD)) {
                 
-# Measure each iteration, added to the next one because of reasons
-$RegexOperation = Measure-Command {
-
                 $CheckSLD = $RegexMatch.SLD -as [bool]
 
                 $RegexSLDTLD = switch ($CheckSLD) {
@@ -295,7 +295,6 @@ $RegexOperation = Measure-Command {
                             FullMatch = [string]$RegexMatch.FULL
                             WellFormed = [Uri]::IsWellFormedUriString(([string]$RegexMatch.FULL), 'Relative')
                             ReSUBmissions = $RegexMatch.REGX # Times regexSUBmission ran before finishing
-                            RunTimeMS = $null # Time to run this iteration
                             SrcIndex = $IndexOf
                         }
                         # Add SUB if CheckSLD:$true
@@ -308,31 +307,23 @@ $RegexOperation = Measure-Command {
                         Write-Host "ErrorNew:   |" -ForegroundColor Yellow
                         Write-Host "`t@$IndexOf`t|`t $line" -ForegroundColor DarkGray
                     }                   
-            } # Add subdomain to parent in hashtable - skip if there is no subdomain
-            elseif (($CheckSLD) -and -not($HashTable['Domains'][$RegexSLDTLD]['SUB']["$($RegexMatch.SUB)"])) {
-                try {
-                    $HashTable['Domains'][$RegexSLDTLD]['SUB'].Add($RegexMatch.SUB, $IndexOf)
-                }
-                catch {
-                    Write-Host "ErrorAdd:    |" -NoNewline -ForegroundColor DarkYellow
-                    Write-Host "`t@$IndexOf`t|`t $line" -ForegroundColor DarkGray
+                } # Add subdomain to parent in hashtable - skip if there is no subdomain
+                elseif (($CheckSLD) -and -not($HashTable['Domains'][$RegexSLDTLD]['SUB']["$($RegexMatch.SUB)"])) {
+                    try {
+                        $HashTable['Domains'][$RegexSLDTLD]['SUB'].Add($RegexMatch.SUB, $IndexOf)
+                    }
+                    catch {
+                        Write-Host "ErrorAdd:    |" -NoNewline -ForegroundColor DarkYellow
+                        Write-Host "`t@$IndexOf`t|`t $line" -ForegroundColor DarkGray
+                    }
+                } 
+                else { 
+                    # End up here if there is no subdomain and parent is already in hashtable
+                    $Duplicate += 1
+                    # Write-Host "ErrorDupe: " -NoNewline -ForegroundColor DarkYellow
+                    # Write-Host "@$IndexOf | ReSubmitted[$($RegexMatch.REGX)] | $line" -ForegroundColor DarkGray
                 }
             } 
-            else { 
-                # End up here if there is no subdomain and parent is already in hashtable
-                $Duplicate += 1
-                # Write-Host "ErrorDupe: " -NoNewline -ForegroundColor DarkYellow
-                # Write-Host "@$IndexOf | ReSubmitted[$($RegexMatch.REGX)] | $line" -ForegroundColor DarkGray
-            }
-
-} # END MEASURE RunTimeMS
-
-            # Add time to run for iteration
-            if (-not[string]::IsNullOrEmpty($RegexSLDTLD)) {
-                $HashTable['Domains'][$RegexSLDTLD].RunTimeMS = $RegexOperation.TotalMilliseconds
-            }
-        } 
-
         } # Output skipped entries / comments
         else {
             $Comments +=1
@@ -367,14 +358,14 @@ $RegexOperation = Measure-Command {
 
 # Information and statistics in the hashtable
     $HashTable['Info'] = [ordered]@{
-        Source = "$([int]$BlockList.Length) entries" # Total length of list
-        Output = "$([int]$HashTable['Domains'].keys.count) entries excl. consolidated subdomains" # unique SLD+TLD matches
-        Reoccuring = "$($OutStatistics.Count) sum of SLD+TLD matches with more than $($ConsolidateLimit) subdomains" # matched SLD+TLD
-        Consolidated = "$([int]$OutStatistics.Sum) sum of subdomains for reoccuring SLD+TLD" # subdomain / hosts that have common SLD+TLD parents
+        Source = "$([int]$BlockList.Length) entries" # Total lines in source
+        Output = "$([int]$HashTable['Domains'].keys.count) entries excl. consolidated subdomains" # Total domains in output list
+        Reoccuring = "$($OutStatistics.Count) sum of SLD+TLD matches with more than $($ConsolidateLimit) subdomains" # Domains caught by '-ConsolidateLimit', ie they had more than set subdomains
+        Consolidated = "$([int]$OutStatistics.Sum) sum of subdomains for reoccuring SLD+TLD" # Total subdomains for reoccuring
         Breakdown = $OutStatistics  # Further breakdown of reoccuring / consolidated
-        Iterations = $IndexOf # Sum of iterations should equal list length
-        Comments = $Comments # Sum of comments in list
-        Duplicate = $Duplicate # Sum of domains that were duplicated (already added once, if they had unique subdomains they are in $Consolidated)
+        Iterations = $IndexOf # Tracks every step of the source list and ties to the matches for easier troubleshooting
+        Comments = $Comments # Sum of skipped lines
+        Duplicate = $Duplicate # Sum of domains that were duplicated, mostly example.com followed by www.example.com
         RunTime = "$($RunTime.TotalSeconds) seconds"
     }
 
@@ -395,14 +386,14 @@ $RegexOperation = Measure-Command {
 }
 
 # ------------------------------------------ [ SCRIPT: CALL FUNCTION ] ------------------------------------------
-# Makes an array of input (or throw error) and send it thru RegexMagic
+# Makes an array of input (or throw error) and send it thru ListDestroyer
 
 if (-not[string]::IsNullOrEmpty($BlockListURL)) {
-    RegexMagic -BlockList ((Invoke-RestMethod $BlockListURL -Method GET) -split '\r?\n')-OutputAs $OutputAs -ConsolidateLimit $ConsolidateLimit -OutConsolidated:$OutConsolidated -ExtremeDebug:$ExtremeDebug 
+    ListDestroyer -BlockList ((Invoke-RestMethod $BlockListURL -Method GET) -split '\r?\n')-OutputAs $OutputAs -ConsolidateLimit $ConsolidateLimit -OutConsolidated:$OutConsolidated -ExtremeDebug:$ExtremeDebug -OutSkipped:$OutSkipped
 }
 elseif (-not[string]::IsNullOrEmpty($BlockListTXT)) {
-    RegexMagic -BlockList (Get-StreamReaderArray -Path $BlockListTXT) -OutputAs $OutputAs -ConsolidateLimit $ConsolidateLimit -OutConsolidated:$OutConsolidated -ExtremeDebug:$ExtremeDebug 
+    ListDestroyer -BlockList (Get-StreamReaderArray -Path $BlockListTXT) -OutputAs $OutputAs -ConsolidateLimit $ConsolidateLimit -OutConsolidated:$OutConsolidated -ExtremeDebug:$ExtremeDebug -OutSkipped:$OutSkipped
 }
 elseif ($BlockListOBJ -is [array]) {
-    RegexMagic -BlockList $BlockListOBJ -OutputAs $OutputAs -ConsolidateLimit $ConsolidateLimit -OutConsolidated:$OutConsolidated -ExtremeDebug:$ExtremeDebug 
+    ListDestroyer -BlockList $BlockListOBJ -OutputAs $OutputAs -ConsolidateLimit $ConsolidateLimit -OutConsolidated:$OutConsolidated -ExtremeDebug:$ExtremeDebug -OutSkipped:$OutSkipped
 }
