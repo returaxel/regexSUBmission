@@ -159,22 +159,18 @@ function RegexSUBmission {
 # -------------------- [ Looping ] 
         # Stop looping when SLD:$false or reached depth of the first input (this loop)
         if ((-not$SLD) -or ($ReSubmissions -eq $PrevObject.InputDepth)) {      
-
-            # DEBUG
-            Write-Host "WarnLoop:$ReSubmissions/$($InputDepth)|" -NoNewline -ForegroundColor Red
-            Write-Host "`t@$IndexOf`t|`t $InputStr | Return:NULL" -ForegroundColor DarkGray
-            
-            if ($ExtremeDebug) {
+            Write-Host "WarnLoop:$ReSubmissions/$($PrevObject.InputDepth)|" -NoNewline -ForegroundColor Red
+            Write-Host "`t@$IndexOf`t|`t | Return:NULL | $InputStr"  -ForegroundColor DarkGray
+            if ($ExtremeDebug) { # DEBUG
                 $PrevObject | Out-Host
                 [Console]::ReadKey() | Out-Null # Pauses until a key is pressed
             }
-
             return $null
         }
         else {
 
             # Values to bring into next iteration
-            [string]$RexString = switch ($SLD) {
+            [string]$NextString = switch ($SLD) {
                 $true { '{0}{1}' -f $RexMatch.Groups[2].Value,$RexMatch.Groups[3].Value }
                 $false { '{0}{1}' -f $RexMatch.Groups[1].Value,$RexMatch.Groups[3].Value }
             }
@@ -185,7 +181,7 @@ function RegexSUBmission {
                 Write-Host "`t@$IndexOf`t|`t $InputStr"  -ForegroundColor DarkGray
             }
 
-            RegexSUBmission -InputStr $RexString -IndexOf $IndexOf -ReSubmissions $ReSubmissions -ExtremeDebug:$ExtremeDebug -PrevObject ([PSCustomObject]@{
+            RegexSUBmission -InputStr $NextString -IndexOf $IndexOf -ReSubmissions $ReSubmissions -ExtremeDebug:$ExtremeDebug -PrevObject ([PSCustomObject]@{
                 SUB = $RexMatch.Groups[1].Value
                 SLD = $RexMatch.Groups[2].Value
                 TLD = $RexMatch.Groups[3].Value
@@ -196,9 +192,9 @@ function RegexSUBmission {
         }
     }             
     else {
-        # InputStr was too long
-        Write-Host "DepthErr:    |" -NoNewline -ForegroundColor DarkMagenta
-        Write-Host "`t@$IndexOf`t|`t Return:NULL | $InputStr " -ForegroundColor DarkGray
+        # Depth of InputStr exceed limit
+        Write-Host "DepthLmt:    |" -NoNewline -ForegroundColor DarkMagenta
+        Write-Host "`t@$IndexOf`t|`t Return:NULL | $InputStr" -ForegroundColor DarkGray
         return $null
     }
 }
@@ -242,7 +238,6 @@ function ListDestroyer {
     $HashTable = @{
         Info = [ordered]@{} # Operational info 
         Domains = [ordered]@{} # Domain list
-        Whitelist = [ordered]@{}
     }
 
 # Measure full duration
