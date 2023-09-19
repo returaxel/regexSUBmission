@@ -72,11 +72,11 @@ function RegexSUBmission {
     # Please note this function is a cardinal sin and loop itself until a match is found.
     param (
         [Parameter()][string]$InputStr,         # String to parse
-        [Parameter()][string]$Regex = '^(?>[\d.]+\ |[.*-]?)([\w*-]+)(\.?[\w.*-]+)?(\.[\w-]{2,})(.*$)',
+        [Parameter()][string]$Regex = '(?![\d.]+\ )([\w*-]+)(\.[\w.*-]+)?(\.[\w-]{2,})(.*$)',
         [Parameter()][string]$IndexOf,          # From ListDestroyer to track where we are in the source
         [Parameter()][Psobject]$PrevObject,     # When resubmitting bring previous result
         [Parameter()][int]$ReSubmissions = 0,   # Prevent eternal looping if something is wrong
-        [Parameter()][int]$HardLoopLimit = 50,  # If the input depth exceeds this value it's skipped (depth = sum of dots)
+        [Parameter()][int]$HardLoopLimit = 100,  # If the input depth exceeds this value it's skipped (depth = sum of dots)
         [Parameter()][switch]$ExtremeDebug      # Troubleshooting switch
     )
 
@@ -85,7 +85,7 @@ function RegexSUBmission {
     $RexMatch = [regex]::Matches($InputStr, $Regex)
 
     # FullMatch
-    [string]$RexFullMatch = '{0}{1}{2}' -f $RexMatch.Groups[1].Value, $RexMatch.Groups[2].Value, $RexMatch.Groups[3].Value
+    [string]$RexFullMatch = $RexMatch.Value
     # Count punctuations/depth
     [int]$InputDepth = [regex]::Matches($RexFullMatch, '\.').Count
 
@@ -133,7 +133,7 @@ function RegexSUBmission {
                 SUB = $PrevObject.SUB
                 SLD = '.{0}' -f $RexMatch.Groups[1].Value
                 TLD = '{0}{1}' -f $RexMatch.Groups[2].Value, $RexMatch.Groups[3].Value
-                FULL = '{0}.{1}{2}{3}' -f $PrevObject.SUB, $RexMatch.Groups[1].Value, $RexMatch.Groups[2].Value, $RexMatch.Groups[3].Value
+                FULL = '{0}.{1}' -f $PrevObject.SUB, $RexMatch.Value
                 REGX = $ReSubmissions
             }
 
@@ -141,7 +141,7 @@ function RegexSUBmission {
         elseif (($InputDepth -le 2) -or ((-not$SLD) -and (-not[string]::IsNullOrEmpty($PrevObject.SLD)))) {
 
             # DEBUG
-            if (($ExtremeDebug)-or ($ReSubmissions -gt 10)) {
+            if (($ExtremeDebug)-or ($ReSubmissions -ge 10)) {
                 Write-Host "Match_In: $ReSubmissions |" -NoNewline -ForegroundColor DarkGreen
                 Write-Host "`t@$IndexOf`t|`t $InputStr" -ForegroundColor DarkGray
             }
@@ -258,7 +258,7 @@ $RunTime = Measure-Command {
         }
 
         # Skip empty and commented lines, edit regex as needed
-        if (-not[string]::IsNullOrWhiteSpace($line) -and (-not[regex]::Match($line,'^!|^@|^#|^<').Success)) {
+        if (-not[string]::IsNullOrWhiteSpace($line) -and (-not[regex]::Match($line,'^[!@#<]').Success)) {
 
             # Regex function
             try {
@@ -284,11 +284,10 @@ $RunTime = Measure-Command {
                     try {
                         $HashTable['Domains'][$RegexSLDTLD] = [ordered]@{
                             # Add to hashtable
-                            SUB = [ordered]@{} # Sub domain
+                            SUB = [ordered]@{} 
                             SLD = [string]$RegexMatch.SLD # Second level domains - everything between SUB and TLD
-                            TLD = [string]$RegexMatch.TLD # Top level domain
+                            TLD = [string]$RegexMatch.TLD 
                             FullMatch = [string]$RegexMatch.FULL
-                            WellFormed = [Uri]::IsWellFormedUriString(([string]$RegexMatch.FULL), 'Relative')
                             ReSUBmissions = $RegexMatch.REGX # Times regexSUBmission ran before finishing
                             SrcIndex = $IndexOf
                         }
