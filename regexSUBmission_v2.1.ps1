@@ -47,7 +47,6 @@ function RegexSUBmission {
     param (
         [Parameter()][string]$inputStr,
         [Parameter()][string]$regex = '(?![\d.]+\ )([\w*-]+)(\.[\w.*-]+)?(\.[\w-]{2,})(.*$)'
-
     )
 
 if (-not[string]::IsNullOrEmpty($InputStr) -and (-not[regex]::Match($InputStr,'^[!|@#<]').Success)) {
@@ -91,7 +90,6 @@ function HashTableGiver {
             $HashTableGift['SLD'] = ([regex]::Matches($RegexString,"(?>$($RegexMatch.Groups[1].Value))([\w.-]*)$($HashTableGift['TLD'])$").Groups[1].Value).TrimStart('.')
     
             #TerminalBloatifier HashGift $OnlySecond $IndexOf DarkGray
-
         }
         catch {
             Write-Host "HashGift:" -NoNewline -ForegroundColor DarkYellow
@@ -142,7 +140,6 @@ function ListDestroyer {
                     #TerminalBloatifier AddedNEW $line $IndexOf DarkGreen
                 } 
                 elseif ($GivenHashTable['SLD'] -notin $HashTable['Domains'][$GivenHashTable['TLD']]['SLD'].Keys) { #-not$HashTable['Domains'][$GivenHashTable['TLD']]['SLD'][$GivenHashTable['SLD']] # Alternative?
-                
                     # Add new SLD
                     $HashTable['Domains'][$GivenHashTable['TLD']]['SLD'][$GivenHashTable['SLD']] =  [System.Collections.Generic.List[string]]@($GivenHashTable['SUB'])
                     #TerminalBloatifier AddedSLD $line $IndexOf Cyan
