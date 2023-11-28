@@ -41,16 +41,12 @@
 
 .NOTES
     Author: returaxel
-    Version: 1.0.8
+    Version: 1.0.9
     Updated: Actually seems to give output that respects the original list.
 
 .EXAMPLE
     Show list information, optionally use -ConsolidateLimit <X> to lower or raise consolidation limit
         .\regexSUBmission.ps1 -BlockListURL <Your favourite blocklist>
-
-    Multiple lists is asking for trouble but almost functions. Heres how!
-        $EatTheOutput = [array]$urls | % {
-        .\regexSUBmission.ps1 $_ -BlockListURL $_}
 #>
 
 [CmdletBinding(DefaultParametersetName='One')] 
@@ -63,7 +59,6 @@ param (
     [Parameter()][switch]$ExtremeDebug,
     [Parameter()][switch]$OutConsolidated,
     [Parameter()][switch]$OutSkipped
-
 )
 
 # ------------------------------------------ [ FUNCTIONS:START ] ------------------------------------------
@@ -75,24 +70,23 @@ function RegexSUBmission {
         [Parameter()][string]$Regex = '(?![\d.]+\ )([\w*-]+)(\.[\w.*-]+)?(\.[\w-]{2,})(.*$)',
         [Parameter()][string]$IndexOf,          # From ListDestroyer to track where we are in the source
         [Parameter()][Psobject]$PrevObject,     # When resubmitting bring previous result
-        [Parameter()][int]$ReSubmissions = 0,   # Prevent eternal looping if something is wrong
-        [Parameter()][int]$HardLoopLimit = 100,  # If the input depth exceeds this value it's skipped (depth = sum of dots)
+        [Parameter()][int]$ReSubmissions = 0,   # Prevent eternal looping if something is wrong, don't edit
+        [Parameter()][int]$InputDepthLimit = 25,  # If the input depth exceeds this value it's skipped (depth = sum of dots)
         [Parameter()][switch]$ExtremeDebug      # Troubleshooting switch
     )
 
-# -------------------- [ Matching ] 
+# -------------------- [ RegExprs ] 
 
     $RexMatch = [regex]::Matches($InputStr, $Regex)
-
     # FullMatch
-    [string]$RexFullMatch = $RexMatch.Value
+    [string]$RexFullMatch = '{0}{1}{2}' -f $RexMatch.Groups[1].Value, $RexMatch.Groups[2].Value, $RexMatch.Groups[3].Value
     # Count punctuations/depth
     [int]$InputDepth = [regex]::Matches($RexFullMatch, '\.').Count
 
 # -------------------- [ InDepth ] 
 
-    # Continue if match found
-    if (-not[string]::IsNullOrEmpty($RexFullMatch) -and ($InputDepth -le $HardLoopLimit)) {
+    # Continue if match found & does not exceed depth limit
+    if (-not[string]::IsNullOrEmpty($RexFullMatch) -and ($InputDepth -le $InputDepthLimit)) {
 
         # Check if match contains an SLD
         [bool]$SLD = ($RexMatch.Groups[2].Value) -as [bool]
@@ -100,7 +94,7 @@ function RegexSUBmission {
         [int]$ReSubmissions += 1
         # Save original input depth to end loop if exceed
         [int]$DepthOfOriginal = switch ($ReSubmissions) {
-            1       {  $InputDepth }
+            1       { $InputDepth }
             Default { $PrevObject.InputDepth }
         }
 
@@ -125,8 +119,9 @@ function RegexSUBmission {
 
         <# WHITELIST 
         Domains ending with SLD+TLD (example: ".co.uk"), will be consolidated under ".co.uk" unless whitelisted
-        Add new by piping another one to the list below: example '\.co\.uk$|<new value>$' #>
-        if (([regex]::Match($RexFullMatch,'\.co\.uk$').Success) -and ($InputDepth -le 2)) {
+        Add new by piping another one to the list below: example '\.co\.uk$|<new value>$' 
+        #>
+        if (([regex]::Match($RexFullMatch,'\.co\.uk$|\.com\.br$').Success) -and ($InputDepth -le 2)) {
 
             # Output: whitelist match
             return [PSCustomObject]@{
@@ -137,8 +132,8 @@ function RegexSUBmission {
                 REGX = $ReSubmissions
             }
 
-        } # Return when input depth is 2 or no SLD match is present (does not catch whitelist) 
-        elseif (($InputDepth -le 2) -or ((-not$SLD) -and (-not[string]::IsNullOrEmpty($PrevObject.SLD)))) {
+        } # Return when input depth is less than 2 or SLD:$false 
+        elseif ($InputDepth -le 2) {
 
             # DEBUG
             if (($ExtremeDebug)-or ($ReSubmissions -ge 10)) {
@@ -155,19 +150,7 @@ function RegexSUBmission {
                 REGX = $ReSubmissions
             }
         } 
-
-# -------------------- [ Looping ] 
-        # Stop looping when SLD:$false or reached depth of the first input (this loop)
-        if ((-not$SLD) -or ($ReSubmissions -eq $PrevObject.InputDepth)) {      
-            Write-Host "WarnLoop:$ReSubmissions/$($PrevObject.InputDepth)|" -NoNewline -ForegroundColor Red
-            Write-Host "`t@$IndexOf`t|`t | Return:NULL | $InputStr"  -ForegroundColor DarkGray
-            if ($ExtremeDebug) { # DEBUG
-                $PrevObject | Out-Host
-                [Console]::ReadKey() | Out-Null # Pauses until a key is pressed
-            }
-            return $null
-        }
-        else {
+        else { # -------------------- [ Looping ] 
 
             # Values to bring into next iteration
             [string]$NextString = switch ($SLD) {
@@ -181,6 +164,7 @@ function RegexSUBmission {
                 Write-Host "`t@$IndexOf`t|`t $InputStr"  -ForegroundColor DarkGray
             }
 
+            # CALLING THIS FUNCTION AGAIN WITH RESULTS FROM THIS ITERATION
             RegexSUBmission -InputStr $NextString -IndexOf $IndexOf -ReSubmissions $ReSubmissions -ExtremeDebug:$ExtremeDebug -PrevObject ([PSCustomObject]@{
                 SUB = $RexMatch.Groups[1].Value
                 SLD = $RexMatch.Groups[2].Value
@@ -193,9 +177,9 @@ function RegexSUBmission {
     }             
     else {
         # Depth of InputStr exceed limit
-        Write-Host "DepthLmt:    |" -NoNewline -ForegroundColor DarkMagenta
-        Write-Host "`t@$IndexOf`t|`t Return:NULL | $InputStr" -ForegroundColor DarkGray
-        return $null
+        Write-Host "DepthLmt:    |" -NoNewline -ForegroundColor Magenta
+        Write-Host "`t@$IndexOf`t|`t | $InputStr" -ForegroundColor DarkGray
+        return
     }
 }
 
@@ -307,8 +291,8 @@ $RunTime = Measure-Command {
                         $HashTable['Domains'][$RegexSLDTLD]['SUB'].Add($RegexMatch.SUB, $IndexOf)
                     }
                     catch {
-                        Write-Host "ErrorAdd:    |" -NoNewline -ForegroundColor DarkYellow
-                        Write-Host "`t@$IndexOf`t|`t $line" -ForegroundColor DarkGray
+                        Write-Host "ErrorAdd:   |" -NoNewline -ForegroundColor DarkYellow
+                        Write-Host "`t@$IndexOf`t|`t | $line" -ForegroundColor DarkGray
                     }
                 } 
                 else { 
@@ -338,7 +322,7 @@ $RunTime = Measure-Command {
         [int]$SubKeyCount = $HashTable['Domains'][$domain]['SUB'].Keys.Count
         # If subdomain count -GE ConsolidateLimit: add SLD+TLD and the total subdomains for each to an object
         if ($SubKeyCount -ge $ConsolidateLimit) {
-            $Consolidated.Add([PSCustomObject]@{Domain = ('*{0}' -f $domain) ; SubKeyCount = $SubKeyCount})
+            $Consolidated.Add([PSCustomObject]@{Domain = $domain ; SubKeyCount = $SubKeyCount})
         } # If OutConsolidated:$true: add every other domain and each subdomain to the output as a separate line
         elseif (($SubKeyCount -lt $ConsolidateLimit) -and $OutConsolidated) {
             $SubKeys = $HashTable['Domains'][$domain]['SUB'].Keys
